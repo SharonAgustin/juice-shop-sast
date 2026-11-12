@@ -1,0 +1,100 @@
+# Archivo: .github/workflows/sast-bearer.yml
+# Define el pipeline de análisis SAST con Bearer CLI que GitHub Actions ejecuta automáticamente.
+
+# Nombre del workflow; es el que aparece en la pestaña Actions del repositorio
+name: SAST con Bearer
+
+# Eventos que disparan la ejecución del workflow
+on:
+  # Se ejecuta cuando hay un push (cambios subidos) a la rama main
+  push:
+    # Filtra el evento push para que solo aplique a la rama indicada
+    branches:
+      # Nombre de la rama que activa el workflow
+      - main
+
+  # Se ejecuta cuando se abre o actualiza un Pull Request
+  pull_request:
+    # Filtra el evento pull_request para que solo aplique a PRs cuyo destino es main
+    branches:
+      # Rama destino del Pull Request que activa el workflow
+      - main
+
+  # Permite ejecutar el análisis manualmente desde la pestaña Actions (botón "Run workflow")
+  workflow_dispatch:
+
+# Permisos del token GITHUB_TOKEN que usa el workflow (solo los mínimos necesarios)
+permissions:
+  # Permite leer el contenido del repositorio, necesario para que actions/checkout descargue el código
+  contents: read
+  # Permite escribir resultados de seguridad, necesario para que upload-sarif publique hallazgos en Code Scanning
+  security-events: write
+
+# Sección que agrupa los trabajos (jobs) que GitHub ejecutará
+jobs:
+  # Identificador del trabajo; puede ser cualquier nombre sin espacios
+  bearer-scan:
+    # Sistema operativo de la máquina virtual donde se ejecuta el trabajo (Ubuntu proporcionado por GitHub)
+    runs-on: ubuntu-latest
+
+    # Lista de pasos que se ejecutan en orden dentro del trabajo
+    steps:
+      # Paso 1: descargar el código del repositorio en la máquina virtual
+      - name: Descargar código
+        # Acción oficial de GitHub que clona el repositorio; @v4 fija la versión de la acción
+        uses: actions/checkout@v4
+
+      # Paso 2: instalar Bearer CLI en la máquina virtual
+      - name: Instalar Bearer
+        # Indica un bloque de comandos de shell que se ejecutan uno tras otro
+        run: |
+          # Descarga el script oficial de instalación de Bearer y lo ejecuta; el binario queda en ./bin
+          curl -sfL https://raw.githubusercontent.com/Bearer/bearer/main/contrib/install.sh | sh
+          # Mueve el ejecutable a /usr/local/bin para poder llamar a "bearer" desde cualquier carpeta
+          sudo mv ./bin/bearer /usr/local/bin/
+          # Muestra la versión instalada en el log, para confirmar que la instalación funcionó
+          bearer version
+
+      # Paso 3: ejecutar el análisis del código y generar el reporte en formato SARIF
+      - name: Análisis SAST y reporte SARIF
+        # Bloque de comandos de shell para este paso
+        run: |
+          # Crea la carpeta reportes; -p evita error si ya existe
+          mkdir -p reportes
+          # Analiza todo el repositorio (.) y guarda el resultado en SARIF; --exit-code 0 hace que el paso no falle por encontrar hallazgos
+          bearer scan . --format sarif --output reportes/reporte-bearer.sarif --exit-code 0
+
+      # Paso 4: generar el reporte HTML con un segundo análisis
+      - name: Generar reporte HTML
+        # Ejecuta el paso aunque un paso anterior haya fallado
+        if: always()
+        # Bloque de comandos de shell para este paso
+        run: |
+          # Crea la carpeta reportes; -p evita error si ya existe
+          mkdir -p reportes
+          # Analiza el repositorio y guarda el reporte en HTML; --exit-code 0 evita que el paso falle por hallazgos
+          bearer scan . --format html --output reportes/reporte-bearer.html --exit-code 0
+
+      # Paso 5: publicar los hallazgos SARIF en la pestaña Security > Code scanning de GitHub
+      - name: Subir resultados a Code Scanning
+        # Ejecuta el paso aunque un paso anterior haya fallado, para no perder hallazgos
+        if: always()
+        # Acción oficial de GitHub que sube un archivo SARIF a Code Scanning; @v3 fija la versión
+        uses: github/codeql-action/upload-sarif@v3
+        # Parámetros que se pasan a la acción
+        with:
+          # Ruta del archivo SARIF que se va a subir
+          sarif_file: reportes/reporte-bearer.sarif
+
+      # Paso 6: guardar el reporte HTML como artefacto descargable de la ejecución
+      - name: Guardar reporte HTML
+        # Ejecuta el paso aunque un paso anterior haya fallado
+        if: always()
+        # Acción oficial que guarda archivos como artefactos; @v4 fija la versión
+        uses: actions/upload-artifact@v4
+        # Parámetros que se pasan a la acción
+        with:
+          # Nombre con el que aparecerá el artefacto en la sección Artifacts
+          name: reporte-html-bearer
+          # Ruta del archivo que se guarda como artefacto
+          path: reportes/reporte-bearer.html
