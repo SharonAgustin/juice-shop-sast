@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 
-router.get('/demo', (req, res) => {
+router.get('/demo', (req, res) =>{
   const operaciones = {
     suma: (a, b) => a + b,
     resta: (a, b) => a - b
